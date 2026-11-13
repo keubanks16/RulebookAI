@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Rulebook AI</title>
+<meta name="description" content="Describe a play and get the ruling, with the rules that back it up.">
+<meta name="theme-color" content="#0F1B2D">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Rulebook AI">
+<style>
+:root { --bg: #F4F1EA; --card: #FFFFFF; --ink: #0F1B2D; --muted: #5B6676; --line: #E2DDD2; --navy: #0F1B2D; --flag: #FFD23F; --flag-ink: #0F1B2D; --bad: #B42318; --ok: #1F7A4D; --field: #FBFAF7; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0B1422; --card: #14213A; --ink: #EEF2F8; --muted: #A3B0C4; --line: #24344F; --field: #0F1B30; --bad: #FF8A7A; --ok: #6FD3A0; } }
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+header.top { background: var(--navy); color: #fff; padding: calc(env(safe-area-inset-top) + 14px) 16px 14px; position: sticky; top: 0; z-index: 5; }
+header.top .in { max-width: 640px; margin: 0 auto; display: flex; align-items: center; gap: 10px; }
+header.top img { width: 34px; height: 34px; border-radius: 8px; }
+header.top h1 { font-size: 19px; margin: 0; letter-spacing: .2px; flex: 1; }
+header.top h1 span { color: var(--flag); }
+.pill { font-size: 12.5px; font-weight: 700; background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 999px; padding: 6px 11px; }
+main { max-width: 640px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 96px); }
+nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); z-index: 6; }
+nav.tabs .in { max-width: 640px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); }
+nav.tabs button { background: none; border: 0; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; padding: 9px 4px 10px; display: grid; gap: 2px; justify-items: center; }
+nav.tabs button .i { font-size: 20px; line-height: 1; filter: grayscale(1); opacity: .7; }
+nav.tabs button[aria-current="page"] { color: var(--ink); }
+nav.tabs button[aria-current="page"] .i { filter: none; opacity: 1; }
+h2 { font-size: 22px; margin: 4px 0 4px; }
+.sub { color: var(--muted); margin: 0 0 14px; font-size: 15px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+.stack { display: grid; gap: 12px; }
+label.f { display: grid; gap: 5px; font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+input, select, textarea { font: inherit; font-size: 16px; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; width: 100%; text-transform: none; letter-spacing: 0; font-weight: 400; }
+textarea { min-height: 120px; resize: vertical; }
+input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 3px solid var(--flag); outline-offset: 1px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.btn { font: inherit; font-weight: 700; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); padding: 12px 16px; min-height: 46px; cursor: pointer; }
+.btn.primary { background: var(--flag); border-color: var(--flag); color: var(--flag-ink); }
+.btn.dark { background: var(--navy); border-color: var(--navy); color: #fff; }
+.btn.block { width: 100%; }
+.btn.sm { padding: 8px 12px; min-height: 38px; font-size: 14px; }
+.btn.ghost { border-color: transparent; color: var(--muted); }
+.btn[disabled] { opacity: .55; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; font: inherit; font-size: 14px; font-weight: 600; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 8px 13px; }
+.chip[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: #fff; }
+.chip[disabled] { opacity: .5; }
+.chip small { font-weight: 500; opacity: .8; }
+.tag { display: inline-block; font-size: 12.5px; font-weight: 700; border-radius: 999px; padding: 3px 10px; background: var(--field); border: 1px solid var(--line); }
+.tag.bad { color: var(--bad); border-color: currentColor; } .tag.ok { color: var(--ok); border-color: currentColor; }
+.lbl { display: block; font-size: 12px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.ruling { border-left: 5px solid var(--flag); padding-left: 12px; }
+.ruling b { font-size: 18px; line-height: 1.35; }
+ul.plain { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.small { font-size: 13.5px; } .muted { color: var(--muted); }
+.err { color: var(--bad); font-weight: 600; }
+button.rowcard { text-align: left; width: 100%; font: inherit; color: inherit; cursor: pointer; display: grid; gap: 4px; }
+.q { white-space: pre-wrap; overflow-wrap: anywhere; }
+.rb-sec h3 { margin: 0 0 6px; font-size: 16px; }
+.rb-sec ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+mark { background: var(--flag); color: var(--flag-ink); border-radius: 3px; padding: 0 2px; }
+.src a { display: inline-block; margin: 0 10px 4px 0; color: inherit; }
+.sheet { position: fixed; inset: 0; background: rgba(8,14,26,.6); z-index: 20; display: grid; align-items: end; }
+.sheet .box { background: var(--bg); border-radius: 18px 18px 0 0; padding: 18px 16px calc(env(safe-area-inset-bottom) + 18px); max-width: 640px; width: 100%; margin: 0 auto; max-height: 92vh; overflow: auto; }
+.meter { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; } .meter i { display: block; height: 100%; background: var(--flag); }
+.dots { display: inline-flex; gap: 5px; } .dots i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .3; animation: d 1s infinite; } .dots i:nth-child(2) { animation-delay: .2s; } .dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes d { 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dots i { animation: none; opacity: .7; } }
+a { color: inherit; }
+</style>
+</head>
+<body>
+<header class="top"><div class="in"><img src="icon.svg" alt=""><h1>The Rulebook <span>AI</span></h1><span id="badge"></span></div></header>
+<main id="app"><p class="muted">Loading…</p></main>
+<nav class="tabs" aria-label="Sections"><div class="in" id="tabs"></div></nav>
+<div id="sheet"></div>
+
+<script type="module">
+import { SPORTS, ASK } from './sports.js';
+import { FIREBASE_KEY, SUPPORT_EMAIL } from './config.js';
+
+// ---------- Small helpers ----------
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('rb.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('rb.' + k, JSON.stringify(v)); } catch (e) { /* private mode */ } },
+  del(k) { try { localStorage.removeItem('rb.' + k); } catch (e) { /* private mode */ } },
+};
+
+// ---------- State ----------
+const S = {
+  tab: 'ask', sport: 'baseball', lib: null, libErr: false,
+  cfg: { free: 3, billing: false, month: 'Monthly', year: '' },
+  auth: store.get('auth', null), me: null,
+  form: Object.assign({ org: 'usssa', age: '', pitch: '', q: '', call: '' }, store.get('form', {})),
+  busy: false, err: '', fresh: null,
+  rulings: null, openId: null,
+  libOrg: store.get('libOrg', 'usssa'), libQ: '',
+  sheet: null,
+};
+const cfgAsk = () => ASK[S.sport];
+
+// ---------- Sign-in (same accounts as The Sports Hub) ----------
+const AUTH_ERR = { EMAIL_EXISTS: 'That email already has an account. Sign in instead.', EMAIL_NOT_FOUND: 'Email or password is wrong.', INVALID_PASSWORD: 'Email or password is wrong.', INVALID_LOGIN_CREDENTIALS: 'Email or password is wrong.', INVALID_EMAIL: 'That email doesn’t look right.', WEAK_PASSWORD: 'Use a password with at least 6 characters.', TOO_MANY_ATTEMPTS_TRY_LATER: 'Too many tries. Wait a few minutes.', USER_DISABLED: 'This account is turned off.' };
+async function fb(path, body) {
+  let r, d;
+  try { r = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:' + path + '?key=' + FIREBASE_KEY, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); d = await r.json(); }
+  catch (e) { throw new Error('Couldn’t reach sign-in. Check your connection.'); }
+  if (!r.ok) { const code = String((d && d.error && d.error.message) || '').split(/[ :]/)[0]; throw new Error(AUTH_ERR[code] || 'Sign-in didn’t work. Try again.'); }
+  return d;
+}
+function setAuth(d) { S.auth = { email: d.email, token: d.idToken, refresh: d.refreshToken, exp: Date.now() + (Number(d.expiresIn) - 60) * 1000 }; store.set('auth', S.auth); }
+async function token() {
+  if (!S.auth) return null;
+  if (S.auth.exp > Date.now()) return S.auth.token;
+  try {
+    const r = await fetch('https://securetoken.googleapis.com/v1/token?key=' + FIREBASE_KEY, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(S.auth.refresh) });
+    const d = await r.json();
+    if (!r.ok) { if (r.status === 400) signOut(); return null; }
+    S.auth = Object.assign({}, S.auth, { token: d.id_token, refresh: d.refresh_token, exp: Date.now() + (Number(d.expires_in) - 60) * 1000 }); store.set('auth', S.auth);
+    return S.auth.token;
+  } catch (e) { return null; }
+}
+function signOut() { S.auth = null; S.me = null; S.rulings = null; S.fresh = null; S.openId = null; store.del('auth'); }
+
+// ---------- Server ----------
+async function api(path, opts) {
+  const o = opts || {};
+  const headers = { 'content-type': 'application/json' };
+  if (o.auth !== false) { const t = await token(); if (!t) { const e = new Error('Sign in to continue.'); e.code = 'sign_in'; throw e; } headers.authorization = 'Bearer ' + t; }
+  let r, d;
+  try { r = await fetch('/api/' + path, { method: o.method || (o.body ? 'POST' : 'GET'), headers, body: o.body ? JSON.stringify(o.body) : undefined }); d = await r.json(); }
+  catch (e) { throw new Error('Couldn’t reach the server. Check your connection.'); }
+  if (!r.ok) { const e = new Error((d && d.detail) || 'Something went wrong. Try again.'); e.code = d && d.error; if (e.code === 'sign_in') signOut(); throw e; }
+  return d;
+}
+async function loadMe() { if (!S.auth) return; try { S.me = (await api('me')).me; } catch (e) { /* shown when they act */ } render(); }
+async function loadRulings() { if (!S.auth) return; try { S.rulings = (await api('rulings')).rulings; } catch (e) { S.rulings = S.rulings || []; } render(); }
+async function loadLib() {
+  if (S.lib) return;
+  try { S.lib = await import(cfgAsk().rules); S.libErr = false; } catch (e) { S.libErr = true; }
+  render();
+}
+
+// ---------- Views ----------
+const orgLabel = (id) => { const o = S.lib && S.lib.ORGS.find((x) => x.id === id); return (o && o.name) || (cfgAsk().orgNames || {})[id] || id.toUpperCase(); };
+function badge() {
+  const m = S.me;
+  $('#badge').innerHTML = !S.auth ? '<button class="pill" data-act="signIn">Sign in</button>'
+    : !m ? '' : m.plan === 'free' ? `<button class="pill" data-act="tab" data-v="account">${m.left} free left</button>` : `<span class="pill">${m.plan === 'comp' ? 'Unlimited' : 'Subscriber'}</span>`;
+}
+function sportChips() {
+  return `<div class="chips" role="group" aria-label="Sport">${SPORTS.map((s) => `<button class="chip" ${s.live ? `data-act="sport" data-v="${s.id}" aria-pressed="${S.sport === s.id}"` : 'disabled'}>${s.icon} ${esc(s.name)}${s.live ? '' : ' <small>soon</small>'}</button>`).join('')}</div>`;
+}
+function rulingCard(x) {
+  const a = x.answer || {};
+  const conf = { high: 'High confidence', medium: 'Medium confidence', low: 'Low confidence' }[a.confidence] || '';
+  const ump = { right: 'Umpire’s call looks right', wrong: 'Umpire’s call looks wrong', judgment: 'Judgment call' }[a.umpireCall] || '';
+  const when = new Date(x.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `<section class="card stack">
+    <div class="small muted">${esc([orgLabel(x.org), x.division, when].filter(Boolean).join(' · '))}</div>
+    <div><span class="lbl">What happened</span><div class="q">${esc(x.q)}</div>${x.call ? `<div class="small" style="margin-top:4px"><b>Umpire ruled:</b> ${esc(x.call)}</div>` : ''}</div>
+    <div class="ruling"><span class="lbl">Ruling</span><b>${esc(a.ruling || '')}</b><div class="row" style="margin-top:8px">${conf ? `<span class="tag">${conf}</span>` : ''}${ump ? `<span class="tag ${a.umpireCall === 'wrong' ? 'bad' : a.umpireCall === 'right' ? 'ok' : ''}">${ump}</span>` : ''}</div></div>
+    ${a.explanation ? `<div><span class="lbl">Why</span>${esc(a.explanation)}</div>` : ''}
+    ${(a.rules || []).length ? `<div><span class="lbl">Rules that apply</span><ul class="plain">${a.rules.map((r) => `<li><b>${esc(r.source)}</b>${r.fromSummary === false ? ' <span class="muted small">(from the AI’s knowledge of the book)</span>' : ''}<div>${esc(r.text)}</div></li>`).join('')}</ul></div>` : ''}
+    ${a.assumes ? `<div><span class="lbl">This assumes</span>${esc(a.assumes)}</div>` : ''}
+    ${(a.questions || []).length ? `<div><span class="lbl">Would change the ruling</span><ul class="plain">${a.questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul></div>` : ''}
+    ${a.askUmpire ? `<div><span class="lbl">How to ask the umpire</span>“${esc(a.askUmpire)}”</div>` : ''}
+    ${a.cut ? '<p class="small err" style="margin:0">The answer was cut off, so part of it may be missing. Ask again for the full version.</p>' : ''}
+    <p class="small muted" style="margin:0">AI reading of the rules, not an official ruling. Umpires and the tournament director have the final say, and judgment calls can’t be protested.</p>
+    <div class="row"><button class="btn sm dark" data-act="more" data-id="${esc(x.id)}">Add detail &amp; ask again</button><button class="btn sm" data-act="share" data-id="${esc(x.id)}">Share</button><button class="btn sm ghost" data-act="del" data-id="${esc(x.id)}">Delete</button></div>
+  </section>`;
+}
+function limitCard() {
+  const c = S.cfg;
+  return `<section class="card stack"><div><b>You’ve used your ${c.free} free rulings.</b><div class="small muted">Subscribe for unlimited rulings. The rules library stays free.</div></div>
+    ${c.billing ? `<button class="btn primary block" data-act="buy" data-v="month">Subscribe · ${esc(c.month)}</button>${c.year ? `<button class="btn block" data-act="buy" data-v="year">${esc(c.year)}</button>` : ''}` : '<p class="small muted" style="margin:0">Subscriptions open soon. Your past rulings stay saved.</p>'}</section>`;
+}
+function viewAsk() {
+  const f = S.form, c = cfgAsk();
+  if (S.fresh) return `<h2>The ruling</h2><p class="sub">Saved to your rulings.</p>${rulingCard(S.fresh)}<div style="height:12px"></div><button class="btn block" data-act="again">Ask about another play</button>`;
+  const out = S.me && S.me.plan === 'free' && S.me.left === 0;
+  const showPitch = c.pitchAges.includes(f.age);
+  return `<h2>What happened?</h2><p class="sub">Describe the play. Get the ruling and the rules behind it.</p>
+  <div class="stack">${sportChips()}
+  ${out ? limitCard() : ''}
+  <section class="card stack">
+    <label class="f">Tournament or rule book<select data-bind="org">${c.orgs.map((o) => `<option value="${o}" ${f.org === o ? 'selected' : ''}>${esc(orgLabel(o))}</option>`).join('')}</select></label>
+    <div class="two"><label class="f">Age group<select data-bind="age"><option value="">Pick one</option>${c.ages.map((a) => `<option ${f.age === a ? 'selected' : ''}>${a}</option>`).join('')}</select></label>
+    ${showPitch ? `<label class="f">Pitching<select data-bind="pitch"><option value="">Pick one</option><option value="coach" ${f.pitch === 'coach' ? 'selected' : ''}>Coach pitch</option><option value="kid" ${f.pitch === 'kid' ? 'selected' : ''}>Kid pitch</option></select></label>` : '<div></div>'}</div>
+    <label class="f">The play<textarea data-bind="q" maxlength="2000" placeholder="${esc(c.placeholder)}">${esc(f.q)}</textarea></label>
+    <label class="f">What the umpire ruled (optional)<input data-bind="call" maxlength="500" value="${esc(f.call)}" placeholder="Called the runner out for interference"></label>
+    ${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ''}
+    <button class="btn primary block" data-act="ask" ${S.busy || out ? 'disabled' : ''}>${S.busy ? 'Checking the rules <span class="dots"><i></i><i></i><i></i></span>' : 'Get the ruling'}</button>
+    ${!S.auth ? `<div class="small muted" style="text-align:center">${S.cfg.free} free rulings. No card needed.</div>` : ''}
+  </section></div>`;
+}
+function viewRulings() {
+  if (!S.auth) return `<h2>Your rulings</h2><p class="sub">Every play you ask about is saved here.</p><section class="card stack"><div>Sign in to see your rulings.</div><button class="btn primary" data-act="signIn">Sign in</button></section>`;
+  if (!S.rulings) { loadRulings(); return '<h2>Your rulings</h2><p class="muted">Loading…</p>'; }
+  const open = S.openId && S.rulings.find((r) => r.id === S.openId);
+  if (open) return `<button class="btn sm ghost" data-act="back">‹ All rulings</button><div style="height:8px"></div>${rulingCard(open)}`;
+  if (!S.rulings.length) return `<h2>Your rulings</h2><section class="card stack"><div>No rulings yet.</div><button class="btn primary" data-act="tab" data-v="ask">Ask about a play</button></section>`;
+  return `<h2>Your rulings</h2><p class="sub">Tap one to see the full ruling.</p><div class="stack">${S.rulings.map((x) => `<button class="card rowcard" data-act="open" data-id="${esc(x.id)}"><span class="small muted">${esc([orgLabel(x.org), x.division, new Date(x.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })].filter(Boolean).join(' · '))}</span><span class="q">${esc(x.q.slice(0, 140))}${x.q.length > 140 ? '…' : ''}</span><span class="small"><b>Ruling:</b> ${esc((x.answer || {}).ruling || '')}</span></button>`).join('')}</div>`;
+}
+function libResults(org, q) {
+  const m = S.lib; if (!m) return '';
+  const STOP = new Set(['a', 'an', 'the', 'per', 'in', 'of', 'to', 'for', 'and', 'or', 'is', 'on', 'at', 'by', 'what', 'how', 'do', 'does', 'can', 'rule', 'rules']);
+  const terms = String(q || '').toLowerCase().replace(/[^a-z0-9'\s-]/g, ' ').split(/\s+/).filter((t) => t.length > 1 && !STOP.has(t)).map((t) => (t.length > 3 && /[^s]s$/.test(t) ? t.slice(0, -1) : t));
+  const hit = (t) => terms.every((w) => t.toLowerCase().includes(w));
+  const mark = (t) => { let h = esc(t); for (const w of terms) h = h.replace(new RegExp('(' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi'), '<mark>$1</mark>'); return h; };
+  const block = (sections) => sections.map((sec) => {
+    const rows = terms.length ? sec.rules.filter((r) => hit(r) || hit(sec.h)) : sec.rules;
+    return rows.length ? `<section class="card rb-sec"><h3>${mark(sec.h)}</h3><ul>${rows.map((r) => `<li>${mark(r)}</li>`).join('')}</ul></section>` : '';
+  }).join('');
+  const srcs = (list) => list.length ? `<div class="small src">${list.map((x) => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.t)} ↗</a>`).join('')}</div>` : '';
+  const none = (name) => `<p class="muted">Nothing in ${esc(name)} matches “${esc(q)}”.</p>`;
+  if (org === 'obr') return `<div class="small muted">MLB’s Official Baseball Rules (OBR) are what USSSA builds on. This is a short list of where they differ from the NFHS book; the full OBR is linked.</div>${srcs([m.OBR_LINK])}${block(m.OBR) || none('the MLB rules list')}`;
+  if (org === 'nfhs') return `<div class="small muted">National Federation of State High School Associations rules, in plain words. Most tournaments use these for anything their own rules don’t cover.</div>${srcs([m.NFHS_LINK])}${block(m.NFHS) || none('the NFHS summaries')}`;
+  const o = m.ORGS.find((x) => x.id === org) || m.ORGS[0];
+  const body = block(o.sections);
+  let more = '';
+  if (terms.length && o.fallback === 'nfhs') { const n = block(m.NFHS); if (n) more = `<h3 style="margin:6px 0 0">From the NFHS rules (${esc(o.name)} falls back on these)</h3>${n}`; }
+  else if (terms.length && o.fallback === 'obr') { const n = block(m.OBR); if (n) more = `<h3 style="margin:6px 0 0">From MLB’s rules (${esc(o.name)} falls back on these, not NFHS)</h3>${n}`; }
+  const fbText = o.fallback === 'nfhs' ? 'Falls back on the NFHS book.' : o.fallback === 'obr' ? 'Falls back on MLB’s Official Baseball Rules, not NFHS.' : o.fallback === 'unknown' ? 'Which book it falls back on varies by event.' : '';
+  return `<div class="small muted">${esc(o.note || '')}${fbText ? ' <b>' + fbText + '</b>' : ''}</div>${srcs(o.src || [])}${body || (more ? '' : none(o.name + '’s rules'))}${more}`;
+}
+function viewLibrary() {
+  if (S.libErr) return '<h2>Rules library</h2><section class="card stack"><div>The rules didn’t load.</div><button class="btn" data-act="retryLib">Try again</button></section>';
+  if (!S.lib) return '<h2>Rules library</h2><p class="muted">Loading…</p>';
+  const ids = S.lib.ORGS.map((o) => o.id).concat(['nfhs', 'obr']);
+  const name = (id) => id === 'nfhs' ? 'NFHS' : id === 'obr' ? 'MLB (OBR)' : orgLabel(id);
+  return `<h2>Rules library</h2><p class="sub">Plain-language summaries, free to browse. Updated ${esc(S.lib.UPDATED || '')}.</p>
+  <div class="stack">${sportChips()}
+  <div class="chips" role="group" aria-label="Rule book">${ids.map((id) => `<button class="chip" data-act="libOrg" data-v="${id}" aria-pressed="${S.libOrg === id}">${esc(name(id))}</button>`).join('')}</div>
+  <input type="search" id="libq" placeholder="Search these rules (try “time limit” or “balk”)" value="${esc(S.libQ)}" aria-label="Search the rules">
+  <div class="stack" id="libres">${libResults(S.libOrg, S.libQ)}</div>
+  <p class="small muted">These are summaries written for coaches, not the official text. The rules sheet at your event wins.</p></div>`;
+}
+function viewAccount() {
+  if (!S.auth) return `<h2>Account</h2><p class="sub">Sign in to ask for rulings and keep them saved.</p><section class="card stack"><div><b>${S.cfg.free} free rulings</b> when you sign in. No card needed.</div><button class="btn primary" data-act="signIn">Sign in or create an account</button></section>${foot()}`;
+  const m = S.me, c = S.cfg;
+  let plan = '<p class="muted">Loading…</p>';
+  if (m) {
+    if (m.plan === 'comp') plan = '<div><b>Unlimited</b><div class="small muted">This account has free unlimited rulings.</div></div>';
+    else if (m.plan === 'pro') plan = `<div><b>Subscriber · unlimited rulings</b>${m.renews ? `<div class="small muted">Current period ends ${new Date(m.renews).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}.</div>` : ''}</div><button class="btn" data-act="manage">Manage subscription</button>`;
+    else plan = `<div><b>Free</b><div class="small muted">${m.left} of ${m.free} free rulings left.</div></div><div class="meter"><i style="width:${Math.min(100, Math.round((m.used / Math.max(1, m.free)) * 100))}%"></i></div>
+      ${c.billing ? `<button class="btn primary block" data-act="buy" data-v="month">Go unlimited · ${esc(c.month)}</button>${c.year ? `<button class="btn block" data-act="buy" data-v="year">${esc(c.year)}</button>` : ''}` : '<div class="small muted">Subscriptions open soon.</div>'}
+      ${m.canManage ? '<button class="btn sm" data-act="manage">Billing history</button>' : ''}`;
+  }
+  return `<h2>Account</h2><p class="sub">${esc(S.auth.email || '')}</p><div class="stack">
+    <section class="card stack">${plan}${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ''}</section>
+    <section class="card stack"><button class="btn" data-act="signOut">Sign out</button><button class="btn ghost sm" data-act="forget">Erase my saved rulings</button>
+    <div class="small muted">Your sign-in is the same one The Sports Hub uses. To delete the sign-in itself, use Delete account in The Sports Hub${SUPPORT_EMAIL ? ` or email ${esc(SUPPORT_EMAIL)}` : ''}.</div></section></div>${foot()}`;
+}
+const foot = () => '<p class="small muted" style="margin-top:18px">The Rulebook AI gives an AI reading of the rules to help coaches and parents. It isn’t affiliated with any tournament organization, the NFHS or MLB, and it isn’t an official ruling. <a href="privacy.html">Privacy</a> · <a href="terms.html">Terms</a></p>';
+
+const TABS = [['ask', '🧑‍⚖️', 'Ask'], ['rulings', '📋', 'Rulings'], ['library', '📖', 'Library'], ['account', '👤', 'Account']];
+function render() {
+  badge();
+  $('#tabs').innerHTML = TABS.map(([id, i, n]) => `<button data-act="tab" data-v="${id}" ${S.tab === id ? 'aria-current="page"' : ''}><span class="i" aria-hidden="true">${i}</span>${n}</button>`).join('');
+  // Keep typing smooth: don't redraw the screen under an open keyboard.
+  const active = document.activeElement, keep = active && active.id === 'libq';
+  if (!keep) $('#app').innerHTML = { ask: viewAsk, rulings: viewRulings, library: viewLibrary, account: viewAccount }[S.tab]();
+  renderSheet();
+}
+function renderSheet() {
+  const sh = S.sheet, root = $('#sheet');
+  if (!sh) { root.innerHTML = ''; return; }
+  const up = sh.mode === 'up';
+  root.innerHTML = `<div class="sheet" data-act="closeSheet"><div class="box stack" role="dialog" aria-modal="true" aria-label="Sign in">
+    <div><h2 style="margin:0">${up ? 'Create your account' : 'Sign in'}</h2><div class="small muted">${up ? `${S.cfg.free} free rulings. No card needed.` : 'Use your Rulebook AI or Sports Hub sign-in.'}</div></div>
+    <label class="f">Email<input id="au-email" type="email" autocomplete="email" inputmode="email" value="${esc(sh.email || '')}"></label>
+    <label class="f">Password<input id="au-pw" type="password" autocomplete="${up ? 'new-password' : 'current-password'}"></label>
+    ${sh.err ? `<div class="err" role="alert">${esc(sh.err)}</div>` : ''}${sh.note ? `<div class="small">${esc(sh.note)}</div>` : ''}
+    <button class="btn primary block" data-act="authGo" ${sh.busy ? 'disabled' : ''}>${sh.busy ? 'One moment…' : up ? 'Create account' : 'Sign in'}</button>
+    <div class="row" style="justify-content:space-between"><button class="btn sm ghost" data-act="authMode">${up ? 'I have an account' : 'Create an account'}</button>${up ? '' : '<button class="btn sm ghost" data-act="authReset">Forgot password</button>'}</div>
+    ${up ? '<div class="small muted">By creating an account you agree to the <a href="terms.html">Terms</a> and <a href="privacy.html">Privacy Policy</a>.</div>' : ''}
+  </div></div>`;
+}
+
+// ---------- Actions ----------
+const readAuth = () => { const sh = S.sheet; sh.email = ($('#au-email') || {}).value || ''; return { email: sh.email.trim(), pw: ($('#au-pw') || {}).value || '' }; };
+const findRuling = (id) => (S.fresh && S.fresh.id === id ? S.fresh : (S.rulings || []).find((r) => r.id === id));
+const A = {
+  tab(d) { S.tab = d.v; S.err = ''; if (d.v !== 'rulings') S.openId = null; render(); window.scrollTo(0, 0); },
+  sport(d) { if (S.sport !== d.v) { S.sport = d.v; S.lib = null; loadLib(); } render(); },
+  signIn() { S.sheet = { mode: store.get('known', false) ? 'in' : 'up', email: '' }; renderSheet(); },
+  closeSheet(d, ev) { if (ev.target.classList.contains('sheet')) { S.sheet = null; renderSheet(); } },
+  authMode() { const a = readAuth(); S.sheet = { mode: S.sheet.mode === 'up' ? 'in' : 'up', email: a.email, then: S.sheet.then }; renderSheet(); },
+  async authGo() {
+    const sh = S.sheet, a = readAuth();
+    if (!a.email || !a.pw) { sh.err = 'Enter your email and password.'; return renderSheet(); }
+    sh.busy = true; sh.err = ''; sh.note = ''; renderSheet();
+    try {
+      setAuth(await fb(sh.mode === 'up' ? 'signUp' : 'signInWithPassword', { email: a.email, password: a.pw, returnSecureToken: true }));
+      store.set('known', true); S.sheet = null; S.rulings = null;
+      await loadMe();
+      if (sh.then === 'ask') A.ask();
+    } catch (e) { sh.busy = false; sh.err = e.message; renderSheet(); }
+  },
+  async authReset() {
+    const sh = S.sheet, a = readAuth();
+    if (!a.email) { sh.err = 'Enter your email first.'; return renderSheet(); }
+    try { await fb('sendOobCode', { requestType: 'PASSWORD_RESET', email: a.email }); } catch (e) { /* same message either way */ }
+    sh.err = ''; sh.note = 'If that email has an account, a reset link is on its way.'; renderSheet();
+  },
+  signOut() { signOut(); S.tab = 'ask'; render(); },
+  async ask() {
+    const f = S.form;
+    if (f.q.trim().length < 15) { S.err = 'Describe the play in a sentence or two.'; return render(); }
+    if (!S.auth) { S.sheet = { mode: store.get('known', false) ? 'in' : 'up', email: '', then: 'ask' }; return renderSheet(); }
+    S.busy = true; S.err = ''; render();
+    try {
+      const d = await api('ask', { body: { sport: S.sport, org: f.org, age: f.age, pitch: f.pitch, q: f.q, call: f.call } });
+      S.fresh = d.ruling; S.me = d.me; if (S.rulings) S.rulings.unshift(d.ruling);
+      f.q = ''; f.call = ''; store.set('form', f);
+    } catch (e) {
+      if (e.code === 'sign_in') { S.sheet = { mode: 'in', email: '', then: 'ask' }; }
+      else if (e.code === 'limit') { await loadMe(); }
+      else S.err = e.message;
+    }
+    S.busy = false; render(); if (S.fresh) window.scrollTo(0, 0);
+  },
+  again() { S.fresh = null; render(); },
+  open(d) { S.openId = d.id; render(); window.scrollTo(0, 0); },
+  back() { S.openId = null; render(); },
+  more(d) {
+    const x = findRuling(d.id); if (!x) return;
+    S.form = Object.assign(S.form, { org: x.org, q: x.q + '\n\nMore detail: ', call: x.call || '' });
+    S.fresh = null; S.openId = null; S.tab = 'ask'; render();
+    const ta = document.querySelector('[data-bind="q"]'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  },
+  async share(d) {
+    const x = findRuling(d.id); if (!x) return; const a = x.answer || {};
+    const text = ['Rulebook check (' + orgLabel(x.org) + (x.division ? ', ' + x.division : '') + ')', 'What happened: ' + x.q, x.call ? 'Umpire ruled: ' + x.call : null, '', 'Ruling: ' + (a.ruling || ''), a.explanation || null, '', (a.rules || []).length ? 'Rules: ' + a.rules.map((r) => r.source + ': ' + r.text).join(' | ') : null, '', 'AI reading of the rules from The Rulebook AI. The umpires and tournament director have the final say.'].filter((l) => l != null).join('\n');
+    try { if (navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); S.err = ''; alertNote('Copied.'); } } catch (e) { /* cancelled */ }
+  },
+  async del(d) {
+    if (!confirm('Delete this ruling?')) return;
+    try { await api('rulings/' + encodeURIComponent(d.id), { method: 'DELETE' }); } catch (e) { return; }
+    S.rulings = (S.rulings || []).filter((r) => r.id !== d.id); if (S.fresh && S.fresh.id === d.id) S.fresh = null; S.openId = null; render();
+  },
+  async buy(d) { S.err = ''; try { location.href = (await api('checkout', { body: { period: d.v } })).url; } catch (e) { S.err = e.message; S.tab = 'account'; render(); } },
+  async manage() { S.err = ''; try { location.href = (await api('portal', { body: {} })).url; } catch (e) { S.err = e.message; render(); } },
+  async forget() {
+    if (!confirm('Erase all your saved rulings? This can’t be undone.')) return;
+    try { await api('forget', { body: {} }); S.rulings = []; S.fresh = null; S.err = ''; alertNote('Your saved rulings were erased.'); } catch (e) { S.err = e.message; }
+    render();
+  },
+  libOrg(d) { S.libOrg = d.v; store.set('libOrg', d.v); render(); },
+  retryLib() { S.libErr = false; loadLib(); },
+};
+function alertNote(t) { const n = document.createElement('div'); n.textContent = t; n.setAttribute('role', 'status'); n.style.cssText = 'position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:#0F1B2D;color:#fff;padding:10px 16px;border-radius:999px;z-index:30;font-weight:600'; document.body.appendChild(n); setTimeout(() => n.remove(), 2200); }
+
+document.addEventListener('click', (ev) => {
+  const el = ev.target.closest('[data-act]'); if (!el) return;
+  if (el.dataset.act === 'closeSheet' && ev.target !== el) return;
+  const fn = A[el.dataset.act]; if (fn) fn(el.dataset, ev);
+});
+document.addEventListener('input', (ev) => {
+  const el = ev.target;
+  if (el.id === 'libq') { S.libQ = el.value; const box = $('#libres'); if (box) box.innerHTML = libResults(S.libOrg, S.libQ); return; }
+  const k = el.dataset && el.dataset.bind; if (!k) return;
+  S.form[k] = el.value;
+  store.set('form', { org: S.form.org, age: S.form.age, pitch: S.form.pitch });
+  if (k === 'age') { if (!cfgAsk().pitchAges.includes(el.value)) S.form.pitch = ''; render(); }
+});
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && S.sheet && ev.target.tagName === 'INPUT') A.authGo(); if (ev.key === 'Escape' && S.sheet) { S.sheet = null; renderSheet(); } });
+
+// ---------- Start ----------
+const params = new URLSearchParams(location.search);
+if (params.get('tab') === 'account' || params.get('subscribed')) S.tab = 'account';
+if (params.get('subscribed')) { history.replaceState(null, '', location.pathname); setTimeout(() => { alertNote('You’re subscribed. Unlimited rulings are on.'); loadMe(); }, 2500); }
+render();
+loadLib();
+api('config', { auth: false }).then((c) => { S.cfg = c; render(); }).catch(() => {});
+loadMe();
+</script>
+</body>
+</html>

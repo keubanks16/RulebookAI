@@ -1,0 +1,8 @@
+{
+  "name": "the-rulebook-ai",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": ["/api/*"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "rulebook-ai", "database_id": "ebb69534-cc76-440d-8852-64bb062fb502" }],
+  "observability": { "enabled": true }
+}
