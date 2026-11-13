@@ -1,1 +1,20 @@
-{ "name": "the-rulebook-ai", "private": true, "type": "module", "scripts": { "test": "node --no-warnings test/test.mjs" } }
+{
+  "name": "the-rulebook-ai",
+  "private": true,
+  "version": "1.0.0",
+  "description": "The Rulebook AI: describe a play, get the ruling (website + iPhone app)",
+  "type": "module",
+  "scripts": {
+    "test": "node --no-warnings test/test.mjs",
+    "build:www": "node scripts/build-www.mjs",
+    "ios:setup": "bash scripts/ios-setup.sh"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
+    "@capgo/native-purchases": "^8.8.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.0"
+  }
+}

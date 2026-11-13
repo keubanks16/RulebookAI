@@ -56,7 +56,7 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = async (u) => { if (String(u).includes('anthropic')) { aiCalls++; return new Response(JSON.stringify({ content: [{ type: 'text', text: '{"ruling":"Runner is out on appeal.","confidence":"high","umpireCall":"","explanation":"e","rules":[],"questions":[]}' }], stop_reason: 'end_turn' })); } throw new Error('unexpected fetch ' + u); };
 
 assert.equal(await (await worker.fetch(new Request('https://x.test/'), env)).text(), 'asset');
-assert.deepEqual((await call('config')).d, { free: 3, billing: false, reset: false, month: 'Monthly', year: '' });
+assert.deepEqual((await call('config')).d, { free: 3, billing: false, reset: false, apple: false, month: 'Monthly', year: '' });
 assert.equal((await call('me')).status, 401);
 assert.equal((await call('me', { token: 'f'.repeat(64) })).status, 401);
 assert.equal((await call('signup', { body: { email: 'bad', password: 'longenough' } })).status, 400);
@@ -91,7 +91,6 @@ env.COMP_EMAILS = 'Other@example.com';
 assert.equal((await call('me', { token: other })).d.me.plan, 'comp');
 sql.prepare("UPDATE users SET sub_status='active' WHERE email='coach@example.com'").run();
 assert.equal((await call('ask', { body: play, token: tok })).status, 200);
-assert.equal((await call('delete-account', { body: {}, token: tok })).status, 400); // subscribed
 sql.prepare("UPDATE users SET sub_status='canceled' WHERE email='coach@example.com'").run();
 // reset is off without a mail key; sign out kills the session
 assert.equal((await call('reset-start', { body: { email: 'coach@example.com' } })).status, 503);
@@ -116,6 +115,69 @@ assert.equal((await call('reset-finish', { body: { email: 'other@example.com', c
 assert.equal((await call('me', { token: other })).status, 401); // old sessions ended
 assert.equal((await call('signin', { body: { email: 'other@example.com', password: 'brandnewpass' } })).status, 200);
 assert.equal((await call('reset-finish', { body: { email: 'other@example.com', code, password: 'another-pass' } })).status, 400); // code is single use
+// ----- rule suggestions -----
+const sug = (b, t) => call('suggest', { body: b, token: t });
+assert.equal((await sug({ name: 'Grand Slam', link: 'grandslam.example/rules' })).status, 401);
+assert.equal((await sug({ name: '', link: 'x.co' }, again)).status, 400);
+assert.equal((await sug({ name: 'Grand Slam' }, again)).status, 400);
+assert.equal((await sug({ name: 'Grand Slam', link: 'grandslam.example/rules', notes: 'We play these every month' }, again)).status, 200);
+assert.equal((await call('suggestions', { token: again })).status, 403); // not the owner
+const owner = (await call('signin', { body: { email: 'other@example.com', password: 'brandnewpass' } })).d.token; // COMP_EMAILS account
+assert.equal((await call('me', { token: owner })).d.me.admin, true);
+const got = (await call('suggestions', { token: owner })).d.suggestions;
+assert.equal(got.length, 1); assert.equal(got[0].link, 'https://grandslam.example/rules'); assert.equal(got[0].email, 'coach@example.com');
+env.ADMIN_EMAILS = 'boss@example.com';
+assert.equal((await call('suggestions', { token: owner })).status, 403);
+delete env.ADMIN_EMAILS;
+assert.equal((await call('suggestions/' + got[0].id, { method: 'DELETE', token: again })).status, 403);
+await call('suggestions/' + got[0].id, { method: 'DELETE', token: owner });
+assert.equal((await call('suggestions', { token: owner })).d.suggestions.length, 0);
+for (let i = 0; i < 5; i++) assert.equal((await sug({ name: 'T' + i + ' tournaments', link: 'a.example' }, again)).status, 200);
+assert.equal((await sug({ name: 'One too many', link: 'a.example' }, again)).status, 429);
+
+// ----- the iPhone app: cross-origin access and Apple purchases -----
+const pre = await worker.fetch(new Request('https://x.test/api/ask', { method: 'OPTIONS', headers: { origin: 'capacitor://localhost' } }), env);
+assert.equal(pre.status, 204); assert.equal(pre.headers.get('access-control-allow-origin'), 'capacitor://localhost');
+assert.equal((await worker.fetch(new Request('https://x.test/api/ask', { method: 'OPTIONS', headers: { origin: 'https://evil.test' } }), env)).status, 403);
+const viaApp = await worker.fetch(new Request('https://x.test/api/iap-info', { method: 'POST', headers: { origin: 'capacitor://localhost', authorization: 'Bearer ' + again, 'content-type': 'application/json' }, body: '{}' }), env);
+assert.equal(viaApp.status, 200); assert.equal(viaApp.headers.get('access-control-allow-origin'), 'capacitor://localhost');
+const { generateKeyPairSync } = await import('node:crypto');
+Object.assign(env, { APPLE_BUNDLE_ID: 'com.test.rulebook', APPLE_ISSUER_ID: 'iss', APPLE_KEY_ID: 'kid', APPLE_PRIVATE_KEY: generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ type: 'pkcs8', format: 'pem' }) });
+const info = (await call('iap-info', { body: {}, token: again })).d;
+const myUid = sql.prepare("SELECT uid FROM users WHERE email='coach@example.com'").get().uid;
+assert.equal(info.appAccountToken, myUid); assert.deepEqual(info.products, { month: 'com.test.rulebook.monthly', year: 'com.test.rulebook.yearly' });
+const fakeJws = (o) => 'x.' + Buffer.from(JSON.stringify(o)).toString('base64url') + '.y';
+let appleState = { status: 1, token: myUid, product: 'com.test.rulebook.monthly', bundle: 'com.test.rulebook' };
+globalThis.fetch = async (u, o) => {
+  if (!String(u).includes('storekit')) throw new Error('unexpected ' + u);
+  assert(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/.test(o.headers.Authorization));
+  if (String(u).includes('storekit.itunes')) return new Response('{}', { status: 404 }); // not in Production; it's a Sandbox purchase
+  return new Response(JSON.stringify({ bundleId: appleState.bundle, environment: 'Sandbox', data: [{ lastTransactions: [{ status: appleState.status, originalTransactionId: 'otid1', signedTransactionInfo: fakeJws({ productId: appleState.product, appAccountToken: appleState.token, purchaseDate: 5, expiresDate: 9999999999999, originalTransactionId: 'otid1' }) }] }] }));
+};
+const txJws = fakeJws({ transactionId: 't1', originalTransactionId: 'otid1', bundleId: 'com.test.rulebook', environment: 'Sandbox' });
+// someone else can't claim a purchase made for this account
+const thief = await call('iap-link', { body: { transactions: [txJws] }, token: owner });
+assert.equal(thief.d.active, false); assert.equal(thief.d.other, true);
+// a transaction for a different app is ignored
+assert.equal((await call('iap-link', { body: { transactions: [fakeJws({ transactionId: 't9', bundleId: 'com.other.app' })] }, token: again })).d.active, false);
+const linked = await call('iap-link', { body: { transactions: [txJws] }, token: again });
+assert.equal(linked.d.active, true); assert.equal(linked.d.me.plan, 'pro'); assert.equal(linked.d.me.store, 'apple');
+globalThis.fetch = async (u, o) => { if (String(u).includes('anthropic')) return new Response(JSON.stringify({ content: [{ type: 'text', text: '{"ruling":"Safe."}' }] })); throw new Error('unexpected'); };
+assert.equal((await call('ask', { body: play, token: again })).status, 200); // was out of free rulings; subscribed now
+// Apple says it expired (notification) -> back to free
+const appleFetch = (state) => async (u) => new Response(String(u).includes('storekit.itunes') ? '{}' : JSON.stringify({ bundleId: 'com.test.rulebook', data: [{ lastTransactions: [{ status: state, originalTransactionId: 'otid1', signedTransactionInfo: fakeJws({ productId: 'com.test.rulebook.monthly', appAccountToken: myUid, purchaseDate: 5, expiresDate: 5 }) }] }] }), { status: String(u).includes('storekit.itunes') ? 404 : 200 });
+globalThis.fetch = appleFetch(2);
+const note = await worker.fetch(new Request('https://x.test/api/apple-notifications', { method: 'POST', body: JSON.stringify({ signedPayload: fakeJws({ data: { bundleId: 'com.test.rulebook', environment: 'Sandbox', signedTransactionInfo: txJws } }) }) }), env);
+assert.equal((await note.json()).msg, 'updated');
+assert.equal((await call('me', { token: again })).d.me.plan, 'free');
+// an expired Apple subscription doesn't switch off a web subscription
+sql.prepare("UPDATE users SET sub_status='active', store='stripe' WHERE uid=?").run(myUid);
+await worker.fetch(new Request('https://x.test/api/apple-notifications', { method: 'POST', body: JSON.stringify({ signedPayload: fakeJws({ data: { bundleId: 'com.test.rulebook', signedTransactionInfo: txJws } }) }) }), env);
+assert.equal((await call('me', { token: again })).d.me.plan, 'pro');
+// deleting a subscribed account works (App Store subscriptions are canceled by the person)
+sql.prepare("UPDATE users SET store='apple' WHERE uid=?").run(myUid);
+assert.equal((await call('delete-account', { body: {}, token: again })).status, 200);
+assert.equal(sql.prepare('SELECT COUNT(*) n FROM suggestions WHERE email IS NOT NULL').get().n, 0);
 globalThis.fetch = realFetch;
 assert.equal((await worker.fetch(new Request('https://x.test/api/stripe-webhook', { method: 'POST', body: '{}' }), { ...env, STRIPE_WEBHOOK_SECRET: 's' })).status, 400);
 assert(SPORTS.filter((s) => s.live).every((s) => ENGINES[s.id] && ASK[s.id]));

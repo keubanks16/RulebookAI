@@ -32,6 +32,14 @@ Until these are set, the app says subscriptions open soon.
 
 Other settings (`FREE_RULINGS`, `DAILY_CAP`, `MODEL`) are listed at the top of `src/worker.js`.
 
+## iPhone app
+
+See `APP_STORE.md`. The app is built from `public/` by `.github/workflows/ios-testflight.yml` and sells the subscription with Apple in-app purchases.
+
+## Rule suggestions
+
+Signed-in users can suggest a tournament's rules from the Library tab. Suggestions show on the Account tab for the emails in `ADMIN_EMAILS` (or `COMP_EMAILS` if that isn't set).
+
 ## Adding a sport
 
 1. Add `public/rules/<sport>.js` (same shape as `baseball.js`).

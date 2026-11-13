@@ -1,0 +1,8 @@
+{
+  "appId": "com.kollinmeubanks.rulebookai",
+  "appName": "Rulebook AI",
+  "webDir": "www",
+  "backgroundColor": "#0F1B2D",
+  "ios": { "contentInset": "never", "limitsNavigationsToAppBoundDomains": false },
+  "plugins": { "SplashScreen": { "launchAutoHide": true, "backgroundColor": "#0F1B2D" } }
+}

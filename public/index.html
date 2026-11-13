@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#0F1B2D">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Rulebook AI">
 <style>
@@ -84,7 +84,13 @@ a { color: inherit; }
 
 <script type="module">
 import { SPORTS, ASK } from './sports.js';
-import { SUPPORT_EMAIL } from './config.js';
+import { SUPPORT_EMAIL, API_URL } from './config.js';
+
+// Running inside the iPhone app (Capacitor) instead of a browser.
+const CAP = window.Capacitor;
+const NATIVE = !!(CAP && typeof CAP.isNativePlatform === 'function' && CAP.isNativePlatform());
+const Purchases = () => (NATIVE && CAP.Plugins && CAP.Plugins.NativePurchases) || null;
+const BASE = NATIVE ? API_URL : '';
 
 // ---------- Small helpers ----------
 const $ = (s) => document.querySelector(s);
@@ -98,7 +104,8 @@ const store = {
 // ---------- State ----------
 const S = {
   tab: 'ask', sport: 'baseball', lib: null, libErr: false,
-  cfg: { free: 3, billing: false, reset: false, month: 'Monthly', year: '' },
+  cfg: { free: 3, billing: false, reset: false, apple: false, month: 'Monthly', year: '' },
+  iap: { loaded: false, loading: false, token: '', ids: {}, prices: {}, busy: '' }, suggestions: null,
   auth: store.get('auth', null), me: null,
   form: Object.assign({ org: 'usssa', age: '', pitch: '', q: '', call: '' }, store.get('form', {})),
   busy: false, err: '', fresh: null,
@@ -111,7 +118,7 @@ const cfgAsk = () => ASK[S.sport];
 // ---------- Sign-in (The Rulebook AI's own accounts) ----------
 function setAuth(d) { S.auth = { email: d.email, token: d.token }; store.set('auth', S.auth); }
 async function token() { return S.auth ? S.auth.token : null; }
-function signOut() { S.auth = null; S.me = null; S.rulings = null; S.fresh = null; S.openId = null; store.del('auth'); }
+function signOut() { S.auth = null; S.me = null; S.suggestions = null; S.iap = { loaded: false, loading: false, token: '', ids: {}, prices: {}, busy: '' }; S.rulings = null; S.fresh = null; S.openId = null; store.del('auth'); }
 
 // ---------- Server ----------
 async function api(path, opts) {
@@ -119,12 +126,13 @@ async function api(path, opts) {
   const headers = { 'content-type': 'application/json' };
   if (o.auth !== false) { const t = await token(); if (!t) { const e = new Error('Sign in to continue.'); e.code = 'sign_in'; throw e; } headers.authorization = 'Bearer ' + t; }
   let r, d;
-  try { r = await fetch('/api/' + path, { method: o.method || (o.body ? 'POST' : 'GET'), headers, body: o.body ? JSON.stringify(o.body) : undefined }); d = await r.json(); }
+  try { r = await fetch(BASE + '/api/' + path, { method: o.method || (o.body ? 'POST' : 'GET'), headers, body: o.body ? JSON.stringify(o.body) : undefined }); d = await r.json(); }
   catch (e) { throw new Error('Couldn’t reach the server. Check your connection.'); }
   if (!r.ok) { const e = new Error((d && d.detail) || 'Something went wrong. Try again.'); e.code = d && d.error; if (e.code === 'sign_in') signOut(); throw e; }
   return d;
 }
 async function loadMe() { if (!S.auth) return; try { S.me = (await api('me')).me; } catch (e) { /* shown when they act */ } render(); }
+async function loadSuggestions() { try { S.suggestions = (await api('suggestions')).suggestions; } catch (e) { S.suggestions = []; } render(); }
 async function loadRulings() { if (!S.auth) return; try { S.rulings = (await api('rulings')).rulings; } catch (e) { S.rulings = S.rulings || []; } render(); }
 async function loadLib() {
   if (S.lib) return;
@@ -161,10 +169,34 @@ function rulingCard(x) {
     <div class="row"><button class="btn sm dark" data-act="more" data-id="${esc(x.id)}">Add detail &amp; ask again</button><button class="btn sm" data-act="share" data-id="${esc(x.id)}">Share</button><button class="btn sm ghost" data-act="del" data-id="${esc(x.id)}">Delete</button></div>
   </section>`;
 }
-function limitCard() {
+// ----- Subscribing: Apple in-app purchase in the iPhone app, Stripe on the website -----
+async function iapLoad() {
+  const P = Purchases(), st = S.iap;
+  if (!P || st.loaded || st.loading || !S.auth) return;
+  st.loading = true;
+  try {
+    const d = await api('iap-info', { body: {} });
+    st.token = d.appAccountToken; st.ids = d.products || {};
+    const got = await P.getProducts({ productIdentifiers: Object.values(st.ids).filter(Boolean), productType: 'subs' });
+    for (const pr of (got && got.products) || []) for (const k in st.ids) if (st.ids[k] === pr.identifier) st.prices[k] = pr.priceString;
+  } catch (e) { /* prices stay empty; the screen says plans aren't available yet */ }
+  st.loading = false; st.loaded = true; render();
+}
+function buyButtons(lead) {
   const c = S.cfg;
-  return `<section class="card stack"><div><b>You’ve used your ${c.free} free rulings.</b><div class="small muted">Subscribe for unlimited rulings. The rules library stays free.</div></div>
-    ${c.billing ? `<button class="btn primary block" data-act="buy" data-v="month">Subscribe · ${esc(c.month)}</button>${c.year ? `<button class="btn block" data-act="buy" data-v="year">${esc(c.year)}</button>` : ''}` : '<p class="small muted" style="margin:0">Subscriptions open soon. Your past rulings stay saved.</p>'}</section>`;
+  if (!NATIVE) return c.billing ? `<button class="btn primary block" data-act="buy" data-v="month">${lead} · ${esc(c.month)}</button>${c.year ? `<button class="btn block" data-act="buy" data-v="year">${esc(c.year)}</button>` : ''}` : '<div class="small muted">Subscriptions open soon.</div>';
+  const st = S.iap;
+  if (!c.apple || !Purchases()) return '<div class="small muted">Subscriptions open soon.</div>';
+  if (!st.loaded) { iapLoad(); return '<div class="small muted">Loading plans…</div>'; }
+  const restore = `<button class="btn sm ghost" data-act="restore" ${st.busy ? 'disabled' : ''}>${st.busy === 'restore' ? 'Checking…' : 'Restore purchases'}</button>`;
+  if (!st.prices.month && !st.prices.year) return `<div class="small muted">Subscriptions aren’t available in the App Store yet. Try again later.</div>${restore}`;
+  return `${st.prices.month ? `<button class="btn primary block" data-act="buy" data-v="month" ${st.busy ? 'disabled' : ''}>${st.busy === 'month' ? 'One moment…' : `Unlimited rulings · ${esc(st.prices.month)} per month`}</button>` : ''}
+    ${st.prices.year ? `<button class="btn block" data-act="buy" data-v="year" ${st.busy ? 'disabled' : ''}>${st.busy === 'year' ? 'One moment…' : `Unlimited rulings · ${esc(st.prices.year)} per year`}</button>` : ''}
+    ${restore}
+    <div class="small muted">The Rulebook AI subscription gives unlimited rulings. Payment is charged to your Apple ID. It renews automatically for the same period at the same price unless you cancel at least 24 hours before the period ends, in your Apple ID’s Subscriptions settings. <a href="terms.html">Terms of Use</a> · <a href="privacy.html">Privacy Policy</a></div>`;
+}
+function limitCard() {
+  return `<section class="card stack"><div><b>You’ve used your ${S.cfg.free} free rulings.</b><div class="small muted">Subscribe for unlimited rulings. The rules library stays free.</div></div>${buyButtons('Subscribe')}</section>`;
 }
 function viewAsk() {
   const f = S.form, c = cfgAsk();
@@ -225,6 +257,7 @@ function viewLibrary() {
   <div class="chips" role="group" aria-label="Rule book">${ids.map((id) => `<button class="chip" data-act="libOrg" data-v="${id}" aria-pressed="${S.libOrg === id}">${esc(name(id))}</button>`).join('')}</div>
   <input type="search" id="libq" placeholder="Search these rules (try “time limit” or “balk”)" value="${esc(S.libQ)}" aria-label="Search the rules">
   <div class="stack" id="libres">${libResults(S.libOrg, S.libQ)}</div>
+  <section class="card row" style="justify-content:space-between"><div style="flex:1;min-width:180px"><b>Don’t see your tournament?</b><div class="small muted">Send us its rules and we’ll look at adding them.</div></div><button class="btn sm dark" data-act="suggest">Suggest rules</button></section>
   <p class="small muted">These are summaries written for coaches, not the official text. The rules sheet at your event wins.</p></div>`;
 }
 function viewAccount() {
@@ -233,13 +266,20 @@ function viewAccount() {
   let plan = '<p class="muted">Loading…</p>';
   if (m) {
     if (m.plan === 'comp') plan = '<div><b>Unlimited</b><div class="small muted">This account has free unlimited rulings.</div></div>';
-    else if (m.plan === 'pro') plan = `<div><b>Subscriber · unlimited rulings</b>${m.renews ? `<div class="small muted">Current period ends ${new Date(m.renews).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}.</div>` : ''}</div><button class="btn" data-act="manage">Manage subscription</button>`;
+    else if (m.plan === 'pro') plan = `<div><b>Subscriber · unlimited rulings</b>${m.renews ? `<div class="small muted">Current period ends ${new Date(m.renews).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}.</div>` : ''}</div>${
+      m.store === 'apple' ? (NATIVE ? '<button class="btn" data-act="manage">Manage subscription</button>' : '<div class="small muted">You subscribed in the iPhone app. Manage it in your iPhone’s Settings → your name → Subscriptions.</div>')
+      : NATIVE ? '<div class="small muted">Your subscription wasn’t bought in this app. Manage it where you subscribed.</div>' : '<button class="btn" data-act="manage">Manage subscription</button>'}`;
     else plan = `<div><b>Free</b><div class="small muted">${m.left} of ${m.free} free rulings left.</div></div><div class="meter"><i style="width:${Math.min(100, Math.round((m.used / Math.max(1, m.free)) * 100))}%"></i></div>
-      ${c.billing ? `<button class="btn primary block" data-act="buy" data-v="month">Go unlimited · ${esc(c.month)}</button>${c.year ? `<button class="btn block" data-act="buy" data-v="year">${esc(c.year)}</button>` : ''}` : '<div class="small muted">Subscriptions open soon.</div>'}
-      ${m.canManage ? '<button class="btn sm" data-act="manage">Billing history</button>' : ''}`;
+      ${buyButtons('Go unlimited')}
+      ${m.canManage && !NATIVE ? '<button class="btn sm" data-act="manage">Billing history</button>' : ''}`;
+  }
+  let admin = '';
+  if (m && m.admin) {
+    if (!S.suggestions) { loadSuggestions(); admin = '<section class="card"><b>Rule suggestions</b><div class="small muted">Loading…</div></section>'; }
+    else admin = `<section class="card stack"><div><b>Rule suggestions</b><div class="small muted">${S.suggestions.length ? 'Sent by users. Only you see these.' : 'None yet. Only you see this.'}</div></div>${S.suggestions.map((x) => `<div class="stack" style="gap:4px;border-top:1px solid var(--line);padding-top:10px"><b>${esc(x.name)}</b>${x.link ? `<a class="small" style="overflow-wrap:anywhere" href="${esc(x.link)}" target="_blank" rel="noopener">${esc(x.link)} ↗</a>` : ''}${x.notes ? `<div class="q small">${esc(x.notes)}</div>` : ''}<div class="row" style="justify-content:space-between"><span class="small muted">${esc([x.email, new Date(x.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })].filter(Boolean).join(' · '))}</span><button class="btn sm ghost" data-act="sugDel" data-id="${esc(x.id)}">Remove</button></div></div>`).join('')}</section>`;
   }
   return `<h2>Account</h2><p class="sub">${esc(S.auth.email || '')}</p><div class="stack">
-    <section class="card stack">${plan}${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ''}</section>
+    <section class="card stack">${plan}${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ''}</section>${admin}
     <section class="card stack"><button class="btn" data-act="signOut">Sign out</button><button class="btn ghost sm" data-act="deleteAccount">Delete account</button></section></div>${foot()}`;
 }
 const foot = () => '<p class="small muted" style="margin-top:18px">The Rulebook AI gives an AI reading of the rules to help coaches and parents. It isn’t affiliated with any tournament organization, the NFHS or MLB, and it isn’t an official ruling. <a href="privacy.html">Privacy</a> · <a href="terms.html">Terms</a></p>';
@@ -256,6 +296,17 @@ function render() {
 function renderSheet() {
   const sh = S.sheet, root = $('#sheet');
   if (!sh) { root.innerHTML = ''; return; }
+  if (sh.mode === 'suggest') {
+    root.innerHTML = `<div class="sheet" data-act="closeSheet"><div class="box stack" role="dialog" aria-modal="true" aria-label="Suggest tournament rules">
+      <div><h2 style="margin:0">Suggest tournament rules</h2><div class="small muted">Tell us which tournament or organization to add. A link to its rules page helps most.</div></div>
+      <label class="f">Tournament or organization<input id="sg-name" maxlength="120" value="${esc(sh.name || '')}" placeholder="Grand Slam Tournaments"></label>
+      <label class="f">Link to its rules<input id="sg-link" type="url" inputmode="url" maxlength="400" value="${esc(sh.link || '')}" placeholder="https://"></label>
+      <label class="f">Notes (optional)<textarea id="sg-notes" maxlength="1500" style="min-height:90px" placeholder="Anything we should know: age groups, rules that differ, where you play.">${esc(sh.notes || '')}</textarea></label>
+      ${sh.err ? `<div class="err" role="alert">${esc(sh.err)}</div>` : ''}
+      <button class="btn primary block" data-act="suggestGo" ${sh.busy ? 'disabled' : ''}>${sh.busy ? 'Sending…' : 'Send suggestion'}</button>
+    </div></div>`;
+    return;
+  }
   const up = sh.mode === 'up', rs = sh.mode === 'reset';
   const title = rs ? 'Reset your password' : up ? 'Create your account' : 'Sign in';
   const subline = rs ? (sh.sent ? 'Enter the 6-digit code we emailed you and pick a new password.' : 'We’ll email you a 6-digit code.') : up ? `${S.cfg.free} free rulings. No card needed.` : 'Welcome back.';
@@ -288,7 +339,7 @@ const A = {
       setAuth(await api(sh.mode === 'up' ? 'signup' : 'signin', { auth: false, body: { email: a.email, password: a.pw } }));
       store.set('known', true); S.sheet = null; S.rulings = null;
       await loadMe();
-      if (sh.then === 'ask') A.ask();
+      if (sh.then === 'ask') A.ask(); else if (sh.then === 'suggest') A.suggest();
     } catch (e) { sh.busy = false; sh.err = e.message; renderSheet(); }
   },
   authReset() {
@@ -343,10 +394,60 @@ const A = {
     try { await api('rulings/' + encodeURIComponent(d.id), { method: 'DELETE' }); } catch (e) { return; }
     S.rulings = (S.rulings || []).filter((r) => r.id !== d.id); if (S.fresh && S.fresh.id === d.id) S.fresh = null; S.openId = null; render();
   },
-  async buy(d) { S.err = ''; try { location.href = (await api('checkout', { body: { period: d.v } })).url; } catch (e) { S.err = e.message; S.tab = 'account'; render(); } },
-  async manage() { S.err = ''; try { location.href = (await api('portal', { body: {} })).url; } catch (e) { S.err = e.message; render(); } },
+  async buy(d) {
+    S.err = '';
+    if (!NATIVE) { try { location.href = (await api('checkout', { body: { period: d.v } })).url; } catch (e) { S.err = e.message; S.tab = 'account'; render(); } return; }
+    const P = Purchases(), st = S.iap, pid = st.ids[d.v];
+    if (!P || !pid || st.busy) return;
+    st.busy = d.v; render();
+    try {
+      const tx = await P.purchaseProduct({ productIdentifier: pid, productType: 'subs', quantity: 1, appAccountToken: st.token });
+      const r = await api('iap-link', { body: { transactions: [tx && tx.jwsRepresentation].filter(Boolean) } });
+      S.me = r.me;
+      alertNote(r.active ? 'You’re subscribed. Unlimited rulings are on.' : 'The purchase is waiting for approval. It turns on once it goes through.');
+    } catch (e) {
+      const m = String((e && (e.message || e.code)) || '');
+      if (!/cancel/i.test(m)) { S.err = /pending|deferred/i.test(m) ? 'The purchase is waiting for approval (for example Ask to Buy). It turns on once it’s approved.' : 'The purchase didn’t go through. Nothing was charged. Try again in a minute.'; S.tab = 'account'; }
+    }
+    st.busy = ''; render();
+  },
+  async restore() {
+    const P = Purchases(), st = S.iap;
+    if (!P || st.busy) return;
+    st.busy = 'restore'; S.err = ''; render();
+    try {
+      await P.restorePurchases().catch(() => {});
+      const have = await P.getPurchases({ productType: 'subs' });
+      const jws = ((have && have.purchases) || []).map((x) => x.jwsRepresentation).filter(Boolean);
+      const r = jws.length ? await api('iap-link', { body: { transactions: jws } }) : null;
+      if (r) S.me = r.me;
+      alertNote(r && r.active ? 'Restored. Unlimited rulings are on.' : r && r.other ? 'That subscription belongs to another account.' : 'No active subscription found on this Apple ID.');
+    } catch (e) { S.err = 'Couldn’t restore purchases. Check your connection and try again.'; S.tab = 'account'; }
+    st.busy = ''; render();
+  },
+  async manage() {
+    S.err = '';
+    if (NATIVE) { const P = Purchases(); try { await P.manageSubscriptions(); } catch (e) { alertNote('Open Settings → your name → Subscriptions.'); } return; }
+    try { location.href = (await api('portal', { body: {} })).url; } catch (e) { S.err = e.message; render(); }
+  },
+  suggest() {
+    if (!S.auth) { S.sheet = { mode: store.get('known', false) ? 'in' : 'up', email: '', then: 'suggest' }; return renderSheet(); }
+    S.sheet = { mode: 'suggest' }; renderSheet();
+  },
+  async suggestGo() {
+    const sh = S.sheet; if (!sh || sh.busy) return;
+    Object.assign(sh, { name: $('#sg-name').value, link: $('#sg-link').value, notes: $('#sg-notes').value, busy: true, err: '' }); renderSheet();
+    try { await api('suggest', { body: { name: sh.name, link: sh.link, notes: sh.notes } }); S.sheet = null; S.suggestions = null; renderSheet(); alertNote('Thanks! Your suggestion was sent.'); }
+    catch (e) { sh.busy = false; sh.err = e.message; renderSheet(); }
+  },
+  async sugDel(d) {
+    if (!confirm('Remove this suggestion?')) return;
+    try { await api('suggestions/' + encodeURIComponent(d.id), { method: 'DELETE' }); S.suggestions = (S.suggestions || []).filter((x) => x.id !== d.id); } catch (e) { /* stays listed */ }
+    render();
+  },
   async deleteAccount() {
-    if (!confirm('Delete your account and all your saved rulings? This can’t be undone.')) return;
+    const apple = S.me && S.me.plan === 'pro' && S.me.store === 'apple';
+    if (!confirm(apple ? 'Delete your account and all your saved rulings? This can’t be undone.\n\nYour App Store subscription is NOT canceled by this. Cancel it in Settings → your name → Subscriptions, or Apple keeps charging you.' : 'Delete your account and all your saved rulings? This can’t be undone.' + (S.me && S.me.plan === 'pro' ? ' Your subscription will be canceled.' : ''))) return;
     try { await api('delete-account', { body: {} }); signOut(); S.tab = 'ask'; S.err = ''; alertNote('Your account was deleted.'); } catch (e) { S.err = e.message; }
     render();
   },
@@ -368,7 +469,7 @@ document.addEventListener('input', (ev) => {
   store.set('form', { org: S.form.org, age: S.form.age, pitch: S.form.pitch });
   if (k === 'age') { if (!cfgAsk().pitchAges.includes(el.value)) S.form.pitch = ''; render(); }
 });
-document.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && S.sheet && ev.target.tagName === 'INPUT') (S.sheet.mode === 'reset' ? A.resetGo : A.authGo)(); if (ev.key === 'Escape' && S.sheet) { S.sheet = null; renderSheet(); } });
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && S.sheet && ev.target.tagName === 'INPUT') (S.sheet.mode === 'suggest' ? A.suggestGo : S.sheet.mode === 'reset' ? A.resetGo : A.authGo)(); if (ev.key === 'Escape' && S.sheet) { S.sheet = null; renderSheet(); } });
 
 // ---------- Start ----------
 const params = new URLSearchParams(location.search);
