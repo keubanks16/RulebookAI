@@ -11,9 +11,15 @@ Describe a play, get the ruling and the rules behind it. A standalone version of
 
 1. Cloudflare dashboard → **Workers & Pages → Create → Import a repository** → pick `keubanks16/RulebookAI` → **Deploy**. Every push to `main` redeploys.
 2. Open the Worker → **Settings → Variables and Secrets** → add `ANTHROPIC_API_KEY` (Secret).
-3. Optional: `COMP_EMAILS` (Text) = your sign-in email, for unlimited free rulings on your own account.
+3. Optional: `COMP_EMAILS` (Text) = your sign-in email, for unlimited free rulings on your own account. Create your account in the app first, since emails aren't verified at sign-up.
 
 The app then works at the Worker's `workers.dev` address. Add a custom domain under **Settings → Domains & Routes**.
+
+## Accounts
+
+The app has its own accounts (email and password), stored in the D1 database. Nothing is shared with The Sports Hub.
+
+Password reset by email is off until you add `RESEND_API_KEY` (Secret, from resend.com) and `MAIL_FROM` (Text, a sender on a domain verified in Resend). Until then, "Forgot password" tells people to contact support; set `SUPPORT_EMAIL` in `public/config.js` to show an address.
 
 ## Subscriptions (Stripe)
 
@@ -32,4 +38,4 @@ Other settings (`FREE_RULINGS`, `DAILY_CAP`, `MODEL`) are listed at the top of `
 2. Add `src/sports/<sport>.js` exporting `clean`, `division`, `orgName`, `buildPrompt`, and register it in `src/sports/index.js`.
 3. Add its entry to `ASK` in `public/sports.js` and set `live: true`.
 
-Run `node test/test.mjs` to check.
+Run `node --no-warnings test/test.mjs` to check.

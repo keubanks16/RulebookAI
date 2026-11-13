@@ -9,7 +9,9 @@
 //   FREE_RULINGS           Text    optional; free rulings per account before subscribing. Default 3.
 //   DAILY_CAP              Text    optional; most rulings one account can ask in 24 hours. Default 40.
 //   MODEL                  Text    optional; defaults to claude-sonnet-5-5.
-//   FIREBASE_PROJECT_ID    Text    optional; the Firebase project people sign in with. Default the-sports-hub-57584.
+//   Password reset emails (optional). Until these are set, "Forgot password" tells people to contact you:
+//   RESEND_API_KEY         Secret  an API key from resend.com.
+//   MAIL_FROM              Text    the sender, e.g. The Rulebook AI <help@yourdomain.com> (a domain verified in Resend).
 //   Subscriptions (Stripe). Until these are set the app says subscriptions are coming soon:
 //   STRIPE_SECRET_KEY      Secret  Stripe -> Developers -> API keys -> Secret key.
 //   STRIPE_WEBHOOK_SECRET  Secret  Stripe -> Developers -> Webhooks -> your endpoint -> Signing secret.
@@ -26,7 +28,7 @@ import { ENGINES } from './sports/index.js';
 import { SPORTS } from '../public/sports.js';
 
 const DEFAULT_MODEL = 'claude-sonnet-5-5';
-const DEFAULT_PROJECT = 'the-sports-hub-57584';
+const SESSION_DAYS = 90, PW_ITER = 100000;
 const MAX_Q = 2000, MAX_CALL = 500, MAX_TOKENS = 3000, HISTORY = 60;
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
@@ -59,8 +61,13 @@ async function api(request, env, url) {
   }
   if (!env.DB) throw fail(500, 'not_configured', 'The database (DB) is not connected to the Worker.');
   await ready(env);
-  const who = await signedIn(request, env);
-  const user = await loadUser(env, who);
+  if (AUTH_PATHS.includes(path)) {
+    if (method !== 'POST') throw fail(405, 'bad_request', 'Use POST.');
+    const b = await request.json().catch(() => null);
+    if (!b || typeof b !== 'object') throw fail(400, 'bad_request', '');
+    return authTask(path, b, env, request);
+  }
+  const user = await signedIn(request, env);
 
   if (path === 'me' && method === 'GET') return json(200, { me: await meOf(env, user) });
   if (path === 'rulings' && method === 'GET') {
@@ -77,7 +84,8 @@ async function api(request, env, url) {
   if (path === 'ask') return ask(env, user, body);
   if (path === 'checkout') return checkout(env, user, body, url.origin);
   if (path === 'portal') return portal(env, user, url.origin);
-  if (path === 'forget') return forget(env, user);
+  if (path === 'signout') return signOutTask(env, request);
+  if (path === 'delete-account') return deleteAccount(env, user);
   throw fail(404, 'bad_request', 'Unknown request.');
 }
 
@@ -85,6 +93,7 @@ function config(env) {
   return {
     free: num(env.FREE_RULINGS, 3),
     billing: !!(env.STRIPE_SECRET_KEY && env.STRIPE_PRICE_MONTH),
+    reset: !!(env.RESEND_API_KEY && env.MAIL_FROM),
     month: env.PRICE_LABEL_MONTH || 'Monthly',
     year: env.STRIPE_PRICE_YEAR ? (env.PRICE_LABEL_YEAR || 'Yearly') : '',
   };
@@ -95,23 +104,15 @@ let READY = false;
 async function ready(env) {
   if (READY) return;
   await env.DB.batch([
-    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (uid TEXT PRIMARY KEY, email TEXT, used INTEGER NOT NULL DEFAULT 0, stripe_customer TEXT, stripe_sub TEXT, sub_status TEXT, period_end INTEGER, created INTEGER)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS users (uid TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, pw_salt TEXT, pw_hash TEXT, fails INTEGER NOT NULL DEFAULT 0, lock_until INTEGER, reset_hash TEXT, reset_exp INTEGER, reset_tries INTEGER NOT NULL DEFAULT 0, used INTEGER NOT NULL DEFAULT 0, stripe_customer TEXT, stripe_sub TEXT, sub_status TEXT, period_end INTEGER, created INTEGER)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, uid TEXT NOT NULL, exp INTEGER NOT NULL)'),
+    // Free rulings already used by an email, kept (as a hash) after an account is deleted so deleting doesn't reset the free count.
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS spent (email_hash TEXT PRIMARY KEY, used INTEGER NOT NULL)'),
     env.DB.prepare('CREATE TABLE IF NOT EXISTS rulings (id TEXT PRIMARY KEY, uid TEXT NOT NULL, at INTEGER NOT NULL, sport TEXT, org TEXT, division TEXT, q TEXT, call TEXT, answer TEXT)'),
     env.DB.prepare('CREATE INDEX IF NOT EXISTS rulings_uid_at ON rulings (uid, at)'),
     env.DB.prepare('CREATE INDEX IF NOT EXISTS users_customer ON users (stripe_customer)'),
   ]);
   READY = true;
-}
-async function loadUser(env, who) {
-  let u = await env.DB.prepare('SELECT * FROM users WHERE uid = ?').bind(who.uid).first();
-  if (!u) {
-    await env.DB.prepare('INSERT OR IGNORE INTO users (uid, email, used, created) VALUES (?, ?, 0, ?)').bind(who.uid, who.email, Date.now()).run();
-    u = await env.DB.prepare('SELECT * FROM users WHERE uid = ?').bind(who.uid).first();
-  } else if (who.email && u.email !== who.email) {
-    await env.DB.prepare('UPDATE users SET email = ? WHERE uid = ?').bind(who.email, who.uid).run();
-    u.email = who.email;
-  }
-  return u;
 }
 const isComp = (env, u) => !!u.email && String(env.COMP_EMAILS || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean).includes(String(u.email).toLowerCase());
 const isPro = (u) => ['active', 'trialing'].includes(u.sub_status || '');
@@ -204,41 +205,90 @@ export function repair(raw) {
   };
 }
 
-// ---------- Sign-in (Firebase ID tokens) ----------
+// ---------- Accounts (The Rulebook AI's own; nothing shared with other apps) ----------
+const AUTH_PATHS = ['signup', 'signin', 'reset-start', 'reset-finish'];
+const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+const rand = (n) => hex(crypto.getRandomValues(new Uint8Array(n)));
+const sha = async (t) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(t))));
+async function pwHash(password, salt) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  return hex(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: new TextEncoder().encode(salt), iterations: PW_ITER }, key, 256));
+}
+function cleanEmail(v) {
+  const e = String(v || '').trim().toLowerCase();
+  if (e.length > 200 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw fail(400, 'bad_email', 'That email doesn’t look right.');
+  return e;
+}
+function cleanPassword(v) {
+  const p = String(v || '');
+  if (p.length < 8) throw fail(400, 'weak_password', 'Use a password with at least 8 characters.');
+  if (p.length > 200) throw fail(400, 'weak_password', 'That password is too long.');
+  return p;
+}
+async function newSession(env, uid) {
+  const token = rand(32);
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM sessions WHERE exp < ?').bind(Date.now()),
+    env.DB.prepare('INSERT INTO sessions (token_hash, uid, exp) VALUES (?, ?, ?)').bind(await sha(token), uid, Date.now() + SESSION_DAYS * 86400000),
+  ]);
+  return token;
+}
+async function authTask(path, b, env) {
+  const email = cleanEmail(b.email);
+  const u = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first();
+
+  if (path === 'signup') {
+    const password = cleanPassword(b.password);
+    if (u) throw fail(409, 'exists', 'That email already has an account. Sign in instead.');
+    const uid = crypto.randomUUID(), salt = rand(16);
+    const before = await env.DB.prepare('SELECT used FROM spent WHERE email_hash = ?').bind(await sha(email)).first();
+    await env.DB.prepare('INSERT INTO users (uid, email, pw_salt, pw_hash, used, created) VALUES (?, ?, ?, ?, ?, ?)').bind(uid, email, salt, await pwHash(password, salt), before ? before.used : 0, Date.now()).run();
+    return json(200, { token: await newSession(env, uid), email });
+  }
+  if (path === 'signin') {
+    const password = String(b.password || '').slice(0, 200);
+    if (u && u.lock_until > Date.now()) throw fail(429, 'locked', 'Too many tries. Wait a few minutes.');
+    const ok = !!u && same(await pwHash(password, u.pw_salt), u.pw_hash);
+    if (!ok) {
+      if (u) { const fails = u.fails + 1; await env.DB.prepare('UPDATE users SET fails = ?, lock_until = ? WHERE uid = ?').bind(fails >= 8 ? 0 : fails, fails >= 8 ? Date.now() + 600000 : null, u.uid).run(); }
+      throw fail(401, 'bad_login', 'Email or password is wrong.');
+    }
+    if (u.fails) await env.DB.prepare('UPDATE users SET fails = 0, lock_until = NULL WHERE uid = ?').bind(u.uid).run();
+    return json(200, { token: await newSession(env, u.uid), email });
+  }
+  if (!env.RESEND_API_KEY || !env.MAIL_FROM) throw fail(503, 'reset_off', 'Password reset by email isn’t set up yet.');
+  if (path === 'reset-start') {
+    // Same reply whether or not the email has an account.
+    if (u && !(u.reset_exp > Date.now() + 14 * 60000)) {
+      const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0');
+      await env.DB.prepare('UPDATE users SET reset_hash = ?, reset_exp = ?, reset_tries = 0 WHERE uid = ?').bind(await sha(u.uid + ':' + code), Date.now() + 15 * 60000, u.uid).run();
+      await fetch('https://api.resend.com/emails', { method: 'POST', headers: { authorization: 'Bearer ' + env.RESEND_API_KEY, 'content-type': 'application/json' },
+        body: JSON.stringify({ from: env.MAIL_FROM, to: [email], subject: 'Your Rulebook AI reset code', text: 'Your password reset code is ' + code + '. It works for 15 minutes. If you didn’t ask for this, ignore this email.' }) }).catch(() => {});
+    }
+    return json(200, { ok: true });
+  }
+  // reset-finish
+  const password = cleanPassword(b.password), code = String(b.code || '').trim();
+  const bad = fail(400, 'bad_code', 'That code is wrong or expired. Ask for a new one.');
+  if (!u || !u.reset_hash || !(u.reset_exp > Date.now()) || u.reset_tries >= 5) throw bad;
+  if (!same(await sha(u.uid + ':' + code), u.reset_hash)) { await env.DB.prepare('UPDATE users SET reset_tries = reset_tries + 1 WHERE uid = ?').bind(u.uid).run(); throw bad; }
+  const salt = rand(16);
+  await env.DB.batch([
+    env.DB.prepare('UPDATE users SET pw_salt = ?, pw_hash = ?, reset_hash = NULL, reset_exp = NULL, fails = 0, lock_until = NULL WHERE uid = ?').bind(salt, await pwHash(password, salt), u.uid),
+    env.DB.prepare('DELETE FROM sessions WHERE uid = ?').bind(u.uid),
+  ]);
+  return json(200, { token: await newSession(env, u.uid), email });
+}
+const bearer = (request) => { const m = /^Bearer\s+([0-9a-f]{64})$/.exec(request.headers.get('authorization') || ''); return m ? m[1] : ''; };
 async function signedIn(request, env) {
-  const m = /^Bearer\s+(.+)$/.exec(request.headers.get('authorization') || '');
-  const p = m && await verifyIdToken(m[1], env.FIREBASE_PROJECT_ID || DEFAULT_PROJECT);
-  if (!p) throw fail(401, 'sign_in', 'Sign in to continue.');
-  return { uid: p.sub, email: typeof p.email === 'string' ? p.email.slice(0, 200) : '' };
+  const t = bearer(request);
+  const u = t && await env.DB.prepare('SELECT u.* FROM sessions s JOIN users u ON u.uid = s.uid WHERE s.token_hash = ? AND s.exp > ?').bind(await sha(t), Date.now()).first();
+  if (!u) throw fail(401, 'sign_in', 'Sign in to continue.');
+  return u;
 }
-let JWKS = null;
-const b64urlBytes = (s) => Uint8Array.from(atob(String(s).replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((String(s).length + 3) % 4)), (c) => c.charCodeAt(0));
-async function verifyIdToken(tok, pid) {
-  try {
-    const parts = String(tok).split('.');
-    if (parts.length !== 3) return null;
-    const parse = (s) => JSON.parse(new TextDecoder().decode(b64urlBytes(s)));
-    const h = parse(parts[0]), p = parse(parts[1]);
-    const now = Date.now() / 1000;
-    if (h.alg !== 'RS256' || !h.kid) return null;
-    if (p.aud !== pid || p.iss !== 'https://securetoken.google.com/' + pid) return null;
-    if (typeof p.sub !== 'string' || !p.sub || p.sub.length > 128) return null;
-    if (!(p.exp > now) || !(p.iat <= now + 300)) return null;
-    let jwk = (await googleKeys(false)).find((k) => k.kid === h.kid);
-    if (!jwk) jwk = (await googleKeys(true)).find((k) => k.kid === h.kid);
-    if (!jwk) return null;
-    const key = await crypto.subtle.importKey('jwk', { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'RS256', ext: true }, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
-    const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64urlBytes(parts[2]), new TextEncoder().encode(parts[0] + '.' + parts[1]));
-    return ok ? p : null;
-  } catch (e) { return null; }
-}
-async function googleKeys(fresh) {
-  if (!fresh && JWKS && JWKS.exp > Date.now()) return JWKS.keys;
-  const r = await fetch('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com');
-  const d = await r.json().catch(() => null);
-  if (!d || !Array.isArray(d.keys)) return (JWKS && JWKS.keys) || [];
-  JWKS = { keys: d.keys, exp: Date.now() + 3600000 };
-  return d.keys;
+async function signOutTask(env, request) {
+  await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha(bearer(request))).run();
+  return json(200, { ok: true });
 }
 
 // ---------- Subscriptions (Stripe) ----------
@@ -270,13 +320,14 @@ async function portal(env, user, origin) {
   const s = await stripe(env, 'billing_portal/sessions', { customer: user.stripe_customer, return_url: origin + '/?tab=account' });
   return json(200, { url: s.url });
 }
-// Removes this person's Rulebook AI data. Their sign-in stays, because it is shared with The Sports Hub.
-async function forget(env, user) {
-  if (isPro(user)) throw fail(400, 'subscribed', 'Cancel your subscription first (Manage subscription), then erase your data.');
+// Deletes the account: sign-in, sessions and saved rulings.
+async function deleteAccount(env, user) {
+  if (isPro(user)) throw fail(400, 'subscribed', 'Cancel your subscription first (Manage subscription), then delete your account.');
   await env.DB.batch([
+    env.DB.prepare('INSERT INTO spent (email_hash, used) VALUES (?, ?) ON CONFLICT(email_hash) DO UPDATE SET used = MAX(used, excluded.used)').bind(await sha(user.email), user.used),
     env.DB.prepare('DELETE FROM rulings WHERE uid = ?').bind(user.uid),
-    // The count of free rulings used stays, so erasing data doesn't hand out more free rulings.
-    env.DB.prepare('UPDATE users SET email = NULL WHERE uid = ?').bind(user.uid),
+    env.DB.prepare('DELETE FROM sessions WHERE uid = ?').bind(user.uid),
+    env.DB.prepare('DELETE FROM users WHERE uid = ?').bind(user.uid),
   ]);
   return json(200, { ok: true });
 }
@@ -308,8 +359,8 @@ export async function stripeSigned(raw, header, secret) {
   const t = parts.t && parts.t[0];
   if (!t || !parts.v1 || Math.abs(Date.now() / 1000 - Number(t)) > 300) return false;
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(t + '.' + raw)));
-  const hex = Array.from(sig, (b) => b.toString(16).padStart(2, '0')).join('');
-  return parts.v1.some((v) => v.length === hex.length && same(v, hex));
+  const sig = (await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(t + '.' + raw)));
+  const mac = hex(sig);
+  return parts.v1.some((v) => same(v, mac));
 }
-function same(a, b) { let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; }
+function same(a, b) { a = String(a || ''); b = String(b || ''); if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; }

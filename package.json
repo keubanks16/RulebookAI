@@ -1,1 +1,1 @@
-{ "name": "the-rulebook-ai", "private": true, "type": "module", "scripts": { "test": "node test/test.mjs" } }
+{ "name": "the-rulebook-ai", "private": true, "type": "module", "scripts": { "test": "node --no-warnings test/test.mjs" } }
