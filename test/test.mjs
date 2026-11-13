@@ -14,6 +14,9 @@ for (const org of ASK.baseball.orgs) for (const age of ['', ...ASK.baseball.ages
 }
 assert.equal(e.clean({ org: 'x', age: '14U', pitch: 'coach' }).pitch, '');
 assert.equal(e.division(e.clean({ org: 'tl', age: '8U', pitch: 'coach' })), '8U, coach pitch division');
+assert.equal(e.division(e.clean({ org: 'tl', age: '9U', pitch: 'coach' })), '9U, kid pitch division');
+assert.equal(e.division(e.clean({ org: 'tl', age: 'High school', pitch: '' })), 'High school');
+assert.equal(e.division(e.clean({ org: 'tl', age: '7U', pitch: '' })), '7U');
 
 // repair
 const good = repair('Here: {"ruling":"Out.","confidence":"high","umpireCall":"right","explanation":"x","rules":[{"source":"NFHS 8-4","text":"t","fromSummary":false}],"questions":["a"],}');

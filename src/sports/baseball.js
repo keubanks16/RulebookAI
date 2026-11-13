@@ -15,7 +15,8 @@ export function clean(input) {
 
 export function division(c) {
   if (!c.age) return 'Age group not given';
-  return c.age + (c.pitch === 'coach' ? ', coach pitch division' : c.pitch === 'kid' ? ', kid pitch division' : '');
+  const kid = c.pitch === 'kid' || (/^\d+U$/.test(c.age) && !cfg.pitchAges.includes(c.age));
+  return c.age + (c.pitch === 'coach' ? ', coach pitch division' : kid ? ', kid pitch division' : '');
 }
 
 export function orgName(org) {

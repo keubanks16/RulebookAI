@@ -18,8 +18,8 @@ export const ASK = {
     orgs: ['usssa', 'pg', 'tl', 'tg', 'tc', 'ft', 'nfhs', 'other'],
     orgNames: { nfhs: 'NFHS (high school rules)', other: 'Other / not sure' },
     ages: ['6U', '7U', '8U', '9U', '10U', '11U', '12U', '13U', '14U', 'High school'],
-    // Ages where the app asks coach pitch or kid pitch.
-    pitchAges: ['6U', '7U', '8U', '9U', '10U'],
+    // Ages where the app asks coach pitch or kid pitch. 9U and up is always kid pitch.
+    pitchAges: ['6U', '7U', '8U'],
     placeholder: 'Runner on first, one out. Batter hits a pop-up to short, the runner bumps into the shortstop while he’s under the ball…',
   },
 };
