@@ -17,6 +17,7 @@ assert.equal(e.division(e.clean({ org: 'tl', age: '8U', pitch: 'coach' })), '8U,
 assert.equal(e.division(e.clean({ org: 'tl', age: '9U', pitch: 'coach' })), '9U, kid pitch division');
 assert.equal(e.division(e.clean({ org: 'tl', age: 'High school', pitch: '' })), 'High school');
 assert.equal(e.division(e.clean({ org: 'tl', age: '7U', pitch: '' })), '7U');
+assert.equal(e.division(e.clean({ org: 'tl', age: '6U', pitch: 'kid' })), '6U, coach pitch division');
 
 // repair
 const good = repair('Here: {"ruling":"Out.","confidence":"high","umpireCall":"right","explanation":"x","rules":[{"source":"NFHS 8-4","text":"t","fromSummary":false}],"questions":["a"],}');
