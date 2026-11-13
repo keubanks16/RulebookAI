@@ -15,7 +15,7 @@ export const ASK = {
   baseball: {
     rules: './rules/baseball.js',
     // Rule books a coach can ask under. "other" = the event isn't listed.
-    orgs: ['usssa', 'pg', 'tl', 'tg', 'tc', 'ft', 'nfhs', 'other'],
+    orgs: ['usssa', 'pg', 'tl', 'tg', 'tc', 'ft', 'sga', 'nfhs', 'other'],
     orgNames: { nfhs: 'NFHS (high school rules)', other: 'Other / not sure' },
     ages: ['6U', '7U', '8U', '9U', '10U', '11U', '12U', '13U', '14U', 'High school'],
     // Ages where the app asks coach pitch or kid pitch. 6U is always coach pitch and 9U and up is always kid pitch.
